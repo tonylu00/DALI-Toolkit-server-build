@@ -21,11 +21,14 @@ if os.environ.get('GITHUB_REF_TYPE') == 'tag' and tag.startswith('v'):
     version = tag
 else:
     # Next patch dev versions sort above the current stable release.
+    tags = subprocess.check_output(['git', 'tag', '--list', 'v*'], cwd=source, text=True).splitlines()
+    bases = [tuple(map(int, m.groups())) for value in [version, *tags]
+             if (m := re.fullmatch(r'v(\d+)\.(\d+)\.(\d+)', value))]
     match = re.fullmatch(r'v(\d+)\.(\d+)\.(\d+)', version)
     if not match:
         raise SystemExit('VERSION must contain a stable vMAJOR.MINOR.PATCH')
-    major, minor, patch = map(int, match.groups())
-    version = f'v{major}.{minor}.{patch + 1}-dev.{now:%Y%m%d%H%M%S}.{commit[:12]}'
+    major, minor, patch = max(bases)
+    version = f'v{major}.{minor}.{patch + 1}-dev.{now:%Y%m%d%H%M%S}.g{commit[:12]}'
 if not re.fullmatch(r'v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?(?:\+[A-Za-z0-9.-]+)?', version):
     raise SystemExit('Invalid version tag')
 channel = 'dev' if '-' in version else 'stable'

@@ -43,6 +43,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: tonylu00/DALI-Toolkit-server
+          fetch-depth: 0
           ref: ${{ steps.pin.outputs.ref }}
           ssh-key: ${{ secrets.SERVER_SOURCE_SSH_KEY }}
           persist-credentials: false
