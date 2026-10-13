@@ -1,0 +1,83 @@
+name: Build signed server releases
+on:
+  push:
+    tags: ['v*', 'commit-*']
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Private source commit or branch
+        default: main
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: server-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve source pin
+        id: pin
+        env:
+          INPUT_REF: ${{ inputs.source_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            ref="$INPUT_REF"
+            [[ "$ref" =~ ^[a-zA-Z0-9_./-]+$ ]] || exit 1
+          else
+            ref=$(git for-each-ref --format='%(contents:subject)' "refs/tags/$GITHUB_REF_NAME")
+            [[ "$ref" =~ ^source-sha=([0-9a-f]{40})$ ]] || exit 1
+            ref="${BASH_REMATCH[1]}"
+          fi
+          printf 'ref=%s\n' "$ref" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: tonylu00/DALI-Toolkit-server
+          ref: ${{ steps.pin.outputs.ref }}
+          ssh-key: ${{ secrets.SERVER_SOURCE_SSH_KEY }}
+          persist-credentials: false
+          path: source
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: source/go.mod
+          cache: false # Never cache files from the private source in this public repo.
+      - name: Test source
+        working-directory: source
+        env:
+          CGO_ENABLED: '1'
+        run: go test -mod=readonly ./...
+      - name: Build and sign three 64-bit targets
+        env:
+          SERVER_UPDATE_SIGNING_KEY: ${{ secrets.SERVER_UPDATE_SIGNING_KEY }}
+          CGO_ENABLED: '0'
+        run: python3 scripts/build.py
+      - name: Publish complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(cat dist/VERSION)
+          options=(--latest=false --prerelease)
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" == v* && "$version" != *-* ]]; then
+            options=(--latest=true --prerelease=false)
+          fi
+          if gh release view "$version" >/dev/null 2>&1; then
+            echo 'Release already exists; refusing to replace signed assets.' >&2
+            exit 1
+          fi
+          gh release create "$version" --target "$GITHUB_SHA" --title "$version" --draft --notes-file dist-notes.md
+          gh release upload "$version" dist/*
+          gh release edit "$version" --draft=false "${options[@]}"
+          gh release view "$version" --json url --jq .url >> "$GITHUB_STEP_SUMMARY"
