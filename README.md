@@ -16,7 +16,7 @@ configures PostgreSQL over its local socket and the systemd daemon. It prefers
 stable releases and falls back to the latest signed public dev prerelease when
 no stable release is published. Use `--channel stable` to require stable only.
 
-Defaults: HTTP `127.0.0.1:8189`, public URL `https://dali.tonycloud.cn:28443`, and
+Defaults: HTTP `127.0.0.1:8189`, public URL `https://dali.tonycloud.cn:29443`, and
 entry point `/usr/local/bin/dali-toolkit-server`. HAProxy, certificates, DNS and
 firewall configuration remain node-specific and are not modified.
 
@@ -33,6 +33,19 @@ Pass `--public-url https://node2.tonycloud.cn:30443` for another node's URL,
 mirror before GitHub. All downloads have mirror fallback and mandatory signature
 verification. Reruns preserve existing binaries, secrets and update preferences.
 Run the script with `--help` for local-binary and PostgreSQL options.
+
+To move an existing deployment to port 29443, update its HAProxy frontend bind,
+any host ACL containing the old port, and `X-Forwarded-Port`; allow TCP 29443 to
+reach HAProxy. Keep the backend at `127.0.0.1:8189`. Existing NAT forwards on
+28443 can remain. Validate and reload HAProxy, then update the advertised URLs:
+
+```bash
+curl -fsSL https://mirrors.tonycloud.cn/raw.githubusercontent.com/tonylu00/DALI-Toolkit-server-build/main/install.sh | sudo bash -s -- --public-url https://dali.tonycloud.cn:29443 --use-mirror
+```
+
+The installer backs up the environment file and updates all advertised HTTPS/WSS
+endpoints together. Reruns without `--public-url` preserve the existing URL.
+Update saved DaliMaster server URLs to the new port too.
 
 Only missing components are installed. Existing PostgreSQL is detected from
 version-specific packages (such as `postgresql-16`), server binaries, registered

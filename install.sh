@@ -21,7 +21,7 @@ Usage: sudo bash install.sh [options]
   --channel CHANNEL   auto (prefer stable, otherwise dev), stable, or dev
   --use-mirror        Try TonyCloud mirror first, then GitHub
   --license PATH      Signed machine licence JSON; existing licence is kept otherwise
-  --public-url URL    First-install default: https://dali.tonycloud.cn:28443
+  --public-url URL    First-install default: https://dali.tonycloud.cn:29443
                       On reruns, preserve the existing URL unless explicitly supplied
   --node-key KEY      First-install default: this host's short hostname
   --pg-socket DIR     PostgreSQL socket directory (default: /var/run/postgresql)
@@ -418,7 +418,7 @@ import tempfile
 import time
 from urllib.parse import urlsplit
 
-DEFAULT_URL = "https://dali.tonycloud.cn:28443"
+DEFAULT_URL = "https://dali.tonycloud.cn:29443"
 KEY_NAMES = ("device-secret-wrap.key", "mqtt-token-signing.key", "project-vault.key")
 HBA_BEGIN = "# BEGIN DALI-Toolkit installer"
 HBA_END = "# END DALI-Toolkit installer"
@@ -819,12 +819,12 @@ PROJECT_VAULT_WRAP_KEY_ID=pv1
 CLOUD_NODE_ROLE=standalone
 CLOUD_NODE_KEY=ubuntu-primary
 CLOUD_NODE_NAME="Ubuntu DALI server"
-CLOUD_PUBLIC_BASE_URL=https://dali.tonycloud.cn:28443
+CLOUD_PUBLIC_BASE_URL=https://dali.tonycloud.cn:29443
 CLOUD_INTERNAL_BASE_URL=http://127.0.0.1:8189
-CLOUD_MQTT_URL=wss://dali.tonycloud.cn:28443/mqtt
-CLOUD_WS_URL=wss://dali.tonycloud.cn:28443/ws
-DEVICE_CLOUD_API_BASE_URLS=https://dali.tonycloud.cn:28443
-DEVICE_CLOUD_BROKER_URIS=dali.tonycloud.cn=wss://dali.tonycloud.cn:28443/mqtt
+CLOUD_MQTT_URL=wss://dali.tonycloud.cn:29443/mqtt
+CLOUD_WS_URL=wss://dali.tonycloud.cn:29443/ws
+DEVICE_CLOUD_API_BASE_URLS=https://dali.tonycloud.cn:29443
+DEVICE_CLOUD_BROKER_URIS=dali.tonycloud.cn=wss://dali.tonycloud.cn:29443/mqtt
 DEVICE_CLOUD_ALLOWED_HOSTS=dali.tonycloud.cn
 DEVICE_CLOUD_REQUIRE_TLS=true
 
