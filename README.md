@@ -34,6 +34,14 @@ mirror before GitHub. All downloads have mirror fallback and mandatory signature
 verification. Reruns preserve existing binaries, secrets and update preferences.
 Run the script with `--help` for local-binary and PostgreSQL options.
 
+Only missing components are installed. Existing PostgreSQL is detected from
+version-specific packages (such as `postgresql-16`), server binaries, registered
+clusters and the selected socket, so the generic `postgresql` package is not
+required. Missing PostgreSQL client tools are handled separately from the server.
+When every dependency is available, apt is skipped entirely. Use `--pg-socket`
+and `--pg-port` to select an existing non-default cluster; `--skip-packages` is
+available to bypass dependency installation explicitly.
+
 The public script is generated from an explicit deployment-file allow-list in
 the private server repository (`deploy/ubuntu/build_installer.py`). It includes
 installation code and public verification keys only; no backend source or issuer

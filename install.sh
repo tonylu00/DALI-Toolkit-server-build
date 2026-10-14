@@ -80,7 +80,7 @@ case "$(uname -m)" in
     *) fail 'Only Linux x64 and aarch64 are supported.' ;;
 esac
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-for file in install_config.py install_download.py server.env.example server-update.json dali-toolkit-server.service; do
+for file in install_dependencies.sh install_config.py install_download.py server.env.example server-update.json dali-toolkit-server.service; do
     [[ -f "$script_dir/$file" ]] || fail "Incomplete installer payload: $file"
 done
 if [[ -n "$binary" ]]; then
@@ -95,18 +95,9 @@ if [[ -n "$license_source" ]]; then
 fi
 exec 9>/run/lock/dali-toolkit-install.lock
 flock -n 9 || fail 'Another DALI-Toolkit installer is running.'
-if ! $skip_packages; then
-    missing=()
-    for package in postgresql postgresql-client ca-certificates curl python3 openssl; do
-        if [[ $(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true) != 'install ok installed' ]]; then
-            missing+=("$package")
-        fi
-    done
-    if ((${#missing[@]})); then
-        apt-get update
-        DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}"
-    fi
-fi
+# shellcheck source=/dev/null
+source "$script_dir/install_dependencies.sh"
+dali_install_dependencies "$skip_packages" "$pg_socket" "$pg_port"
 for command in psql createuser createdb curl python3 openssl runuser systemctl systemd-analyze; do
     command -v "$command" >/dev/null || fail "Required command missing: $command"
 done
@@ -294,7 +285,119 @@ printf 'Configuration: /etc/dali-toolkit/server.env\nUpdate settings: /var/lib/d
 printf 'Read AUTH_BOOTSTRAP_TOKEN privately from server.env for the first DaliMaster login.\n'
 printf 'HAProxy, certificates, DNS and firewall have not been changed.\n'
 DALI_INSTALL_PAYLOAD_0_END
-    cat > "$bundle/install_config.py" <<'DALI_INSTALL_PAYLOAD_1_END'
+    cat > "$bundle/install_dependencies.sh" <<'DALI_INSTALL_PAYLOAD_1_END'
+#!/usr/bin/env bash
+# Sourced by install_body.sh; keep dependency discovery independent of provisioning.
+
+dali_command_works() {
+    command -v "$1" >/dev/null 2>&1 && "$1" --version >/dev/null 2>&1
+}
+
+dali_postgres_binaries() {
+    local binary
+    for binary in /usr/lib/postgresql/*/bin/postgres /usr/local/pgsql/bin/postgres; do
+        [[ ! -x "$binary" ]] || printf '%s\n' "$binary"
+    done
+}
+
+dali_install_dependencies() {
+    local skip_packages=$1 pg_socket=$2 pg_port=$3
+    local inventory package status binary version clusters command candidate
+    local server_present=false clients_present=true server_version=
+    local -a missing=() versions=()
+    local -A installed=()
+
+    $skip_packages && return 0
+    inventory=$(dpkg-query -W -f='${binary:Package}\t${Status}\n') || {
+        printf 'ERROR: Cannot read installed packages; refusing to guess dependencies.\n' >&2
+        return 1
+    }
+    while IFS=$'\t' read -r package status; do
+        package=${package%%:*}
+        # The selection can be "hold" as well as "install".
+        [[ "$status" == *' ok installed' ]] || continue
+        installed["$package"]=1
+        if [[ "$package" =~ ^postgresql-([0-9]+(\.[0-9]+)?)$ ]]; then
+            server_present=true
+            versions+=("${BASH_REMATCH[1]}")
+        elif [[ "$package" == postgresql ]]; then
+            server_present=true
+        fi
+    done <<< "$inventory"
+
+    # A working server need not have an unversioned Debian meta-package or be on PATH.
+    if command -v postgres >/dev/null 2>&1; then
+        server_present=true
+        version=$(postgres --version 2>/dev/null || true)
+        if [[ "$version" =~ PostgreSQL\)\ ([0-9]+)(\.([0-9]+))? ]]; then
+            candidate=${BASH_REMATCH[1]}
+            if ((candidate < 10)) && [[ -n ${BASH_REMATCH[3]:-} ]]; then
+                candidate+=.${BASH_REMATCH[3]}
+            fi
+            versions+=("$candidate")
+        fi
+    fi
+    while IFS= read -r binary; do
+        [[ -n "$binary" ]] || continue
+        server_present=true
+        if [[ "$binary" =~ /postgresql/([0-9]+(\.[0-9]+)?)/bin/postgres$ ]]; then
+            versions+=("${BASH_REMATCH[1]}")
+        fi
+    done < <(dali_postgres_binaries)
+    if command -v pg_lsclusters >/dev/null 2>&1; then
+        clusters=$(pg_lsclusters --no-header) || {
+            printf 'ERROR: Cannot inspect PostgreSQL clusters; refusing to install another server.\n' >&2
+            return 1
+        }
+        while read -r version candidate; do
+            [[ "$version" =~ ^[0-9]+(\.[0-9]+)?$ ]] || continue
+            server_present=true
+            versions+=("$version")
+        done <<< "$clusters"
+    fi
+    [[ ! -S "$pg_socket/.s.PGSQL.$pg_port" ]] || server_present=true
+    if ((${#versions[@]})); then
+        server_version=$(printf '%s\n' "${versions[@]}" | sort -V | tail -n 1)
+    fi
+
+    # pg_wrapper may exist even when no actual PostgreSQL client is installed.
+    for command in psql createuser createdb; do
+        dali_command_works "$command" || clients_present=false
+    done
+    if $server_present; then
+        printf 'Reusing existing PostgreSQL; no server package will be installed.\n'
+    else
+        missing+=(postgresql)
+    fi
+    if ! $clients_present; then
+        candidate=postgresql-client
+        [[ -z "$server_version" ]] || candidate="postgresql-client-$server_version"
+        missing+=("$candidate")
+    fi
+    for command in curl python3 openssl; do
+        dali_command_works "$command" || missing+=("$command")
+    done
+    if [[ ! -s /etc/ssl/certs/ca-certificates.crt && -z ${installed[ca-certificates]:-} ]]; then
+        missing+=(ca-certificates)
+    fi
+
+    # An installed but unusable package needs repair, not an implicit upgrade/reinstall.
+    for package in "${missing[@]}"; do
+        if [[ -n ${installed[$package]:-} ]]; then
+            printf 'ERROR: %s is installed but its required commands do not work; repair it and rerun.\n' "$package" >&2
+            return 1
+        fi
+    done
+    if ((${#missing[@]})); then
+        printf 'Installing missing components: %s\n' "${missing[*]}"
+        apt-get update || return
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-upgrade "${missing[@]}" || return
+    else
+        printf 'All required components are present; skipping apt.\n'
+    fi
+}
+DALI_INSTALL_PAYLOAD_1_END
+    cat > "$bundle/install_config.py" <<'DALI_INSTALL_PAYLOAD_2_END'
 #!/usr/bin/env python3
 """Installer file operations; standard library only, never prints secret values."""
 import argparse
@@ -498,8 +601,8 @@ if __name__ == "__main__":
         main()
     except (ValueError, OSError) as error:
         raise SystemExit(f"Configuration error: {error}")
-DALI_INSTALL_PAYLOAD_1_END
-    cat > "$bundle/install_download.py" <<'DALI_INSTALL_PAYLOAD_2_END'
+DALI_INSTALL_PAYLOAD_2_END
+    cat > "$bundle/install_download.py" <<'DALI_INSTALL_PAYLOAD_3_END'
 #!/usr/bin/env python3
 """Anonymous release download with the server's Ed25519 trust contract."""
 import argparse
@@ -670,8 +773,8 @@ if __name__ == "__main__":
         print(install_download(args.output, args.arch, args.channel, args.use_mirror))
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         raise SystemExit(f"Release download failed: {error}")
-DALI_INSTALL_PAYLOAD_2_END
-    cat > "$bundle/server.env.example" <<'DALI_INSTALL_PAYLOAD_3_END'
+DALI_INSTALL_PAYLOAD_3_END
+    cat > "$bundle/server.env.example" <<'DALI_INSTALL_PAYLOAD_4_END'
 # systemd EnvironmentFile syntax: no "export", no shell substitutions.
 # Default public endpoint uses the existing *.tonycloud.cn DNS/certificate.
 SERVER_ADDR=127.0.0.1:8189
@@ -726,16 +829,16 @@ WS_PATH=/ws
 FIRMWARE_STORAGE_DIR=/var/lib/dali-toolkit/firmware
 APP_EMBED_ENABLED=true
 APP_STATIC_PATH=/var/lib/dali-toolkit/app
-DALI_INSTALL_PAYLOAD_3_END
-    cat > "$bundle/server-update.json" <<'DALI_INSTALL_PAYLOAD_4_END'
+DALI_INSTALL_PAYLOAD_4_END
+    cat > "$bundle/server-update.json" <<'DALI_INSTALL_PAYLOAD_5_END'
 {
   "auto_update": false,
   "check_interval_seconds": 86400,
   "channel": "stable",
   "use_mirror": false
 }
-DALI_INSTALL_PAYLOAD_4_END
-    cat > "$bundle/dali-toolkit-server.service" <<'DALI_INSTALL_PAYLOAD_5_END'
+DALI_INSTALL_PAYLOAD_5_END
+    cat > "$bundle/dali-toolkit-server.service" <<'DALI_INSTALL_PAYLOAD_6_END'
 [Unit]
 Description=DALI-Toolkit Server
 After=network-online.target postgresql.service
@@ -769,7 +872,7 @@ CapabilityBoundingSet=
 
 [Install]
 WantedBy=multi-user.target
-DALI_INSTALL_PAYLOAD_5_END
+DALI_INSTALL_PAYLOAD_6_END
     bash "$bundle/install_body.sh" "$@"
 )
 dali_toolkit_install "$@"
