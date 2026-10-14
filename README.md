@@ -52,6 +52,8 @@ secrets. Normal commits publishing installer changes do not trigger builds.
 Stable versions are published from `v*` source tags; manual builds are public dev
 prereleases. Normal branch commits never trigger a build. A draft is used only
 while assets are uploading. One Linux runner cross-compiles all three targets.
+The same job tests fresh database migrations and licence-tier seeding against a
+temporary PostgreSQL 16 service, with user foreign keys enforced.
 
 The private source repository sends annotated trigger tags containing its exact
 commit. This repository can also be dispatched manually with `source_ref`.

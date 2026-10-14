@@ -19,6 +19,18 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: write
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: dali-ci-test-only
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -56,6 +68,7 @@ jobs:
         working-directory: source
         env:
           CGO_ENABLED: '1'
+          SERVER_TEST_POSTGRES_DSN: postgres://postgres:dali-ci-test-only@127.0.0.1:${{ job.services.postgres.ports[5432] }}/postgres?sslmode=disable
         run: go test -mod=readonly ./...
       - name: Build and sign three 64-bit targets
         env:
