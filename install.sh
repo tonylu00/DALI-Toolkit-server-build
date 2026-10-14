@@ -290,7 +290,11 @@ DALI_INSTALL_PAYLOAD_0_END
 # Sourced by install_body.sh; keep dependency discovery independent of provisioning.
 
 dali_command_works() {
-    command -v "$1" >/dev/null 2>&1 && "$1" --version >/dev/null 2>&1
+    command -v "$1" >/dev/null 2>&1 || return 1
+    case "$1" in
+        openssl) "$1" version >/dev/null 2>&1 ;;
+        *) "$1" --version >/dev/null 2>&1 ;;
+    esac
 }
 
 dali_postgres_binaries() {
